@@ -554,6 +554,9 @@ HTML = r"""
                 <p>Die App nutzt ein inklusives Kontingent zum Kompilieren der Regeln. Falls du eine Meldung bekommst, dass das Limit erreicht ist, kannst du unter "Einstellungen" einen eigenen kostenlosen Gemini API Key eintragen. Den bekommst du hier:</p>
                 <p><a href="https://aistudio.google.com/apikey" target="_blank" style="color: #818cf8;">aistudio.google.com/apikey</a> — Google-Konto reicht, kostet nichts.</p>
 
+                <h3>Datenschutz</h3>
+                <p>Deine Skripte werden <strong>nicht</strong> online gespeichert. Die Dateien werden nur zum Formatieren kurz verarbeitet und sofort wieder gelöscht. Nichts bleibt auf dem Server. Auch deine Regeln werden nur lokal in deinem Browser gespeichert.</p>
+
                 <div class="tip">
                     <strong>Tipp:</strong> Die KI versteht auch komplexe Regeln — z.B. unterschiedliche Farben pro Rolle, Szenenüberschriften in Versalien, oder kursive Regieanweisungen. Je genauer du beschreibst, desto besser das Ergebnis.
                 </div>
