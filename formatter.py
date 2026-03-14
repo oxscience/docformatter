@@ -500,6 +500,15 @@ def format_document(source_path, compiled_rules):
 
         # --- EMPTY ---
         if ptype == T_EMPTY:
+            # Suppress empty lines immediately before a scene heading
+            # (scene_blank_lines will add the correct number)
+            if scene_blank:
+                next_real = i + 1
+                while next_real < len(classifications) and classifications[next_real][0] == T_EMPTY:
+                    next_real += 1
+                if next_real < len(classifications) and classifications[next_real][0] == T_SCENE:
+                    continue  # skip — scene handler adds its own blanks
+
             p = doc.add_paragraph()
             _format_paragraph(p, d_align, d_spacing)
             continue
