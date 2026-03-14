@@ -1,0 +1,45 @@
+╔══════════════════════════════════════════════════╗
+║            DocFormatter — Kurzanleitung          ║
+╚══════════════════════════════════════════════════╝
+
+
+MAC:
+════
+  Datei: DocFormatter.command
+
+  ERSTER START (einmalig):
+  1. Rechtsklick auf "DocFormatter.command"
+  2. Im Menü auf "Öffnen" klicken
+  3. Im Popup nochmal auf "Öffnen" klicken
+
+     macOS blockiert unbekannte Dateien beim
+     ersten Mal. Das ist normal und kein Virus!
+
+     Falls "Öffnen" nicht im Popup erscheint:
+     → Systemeinstellungen > Datenschutz & Sicherheit
+     → Ganz unten steht "DocFormatter.command wurde blockiert"
+     → Auf "Trotzdem öffnen" klicken
+
+  AB DEM ZWEITEN MAL:
+  Einfach Doppelklick auf "DocFormatter.command"
+
+
+WINDOWS:
+════════
+  Datei: DocFormatter.bat
+
+  1. Doppelklick auf "DocFormatter.bat"
+  2. Falls Windows fragt: "Trotzdem ausführen" klicken
+
+  Falls Python fehlt, zeigt das Skript eine Anleitung.
+  WICHTIG bei der Python-Installation:
+  Den Haken bei "Add Python to PATH" setzen! (ganz unten)
+
+
+SO FUNKTIONIERT'S (beide Systeme):
+══════════════════════════════════
+  1. Template hochladen (einmalig dein Referenz-Dokument)
+  2. Skripte per Drag & Drop reinziehen
+  3. Formatierte Dateien werden automatisch heruntergeladen
+
+  Zum Beenden: Terminal-/Kommandozeilen-Fenster schließen.
