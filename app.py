@@ -397,6 +397,83 @@ HTML = r"""
             font-size: 0.8rem;
         }
 
+        /* How-To Card */
+        .howto-card {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+        }
+
+        .howto-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            color: #ccc;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .howto-toggle:hover { color: #fff; }
+
+        .howto-toggle .arrow {
+            font-size: 0.7rem;
+            color: #888;
+            transition: transform 0.2s;
+        }
+
+        .howto-content {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #2a2a2a;
+        }
+
+        .howto-content.open { display: block; }
+
+        .howto-content h3 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #e0e0e0;
+            margin: 1rem 0 0.4rem 0;
+        }
+
+        .howto-content h3:first-child { margin-top: 0; }
+
+        .howto-content p,
+        .howto-content li {
+            font-size: 0.82rem;
+            color: #999;
+            line-height: 1.6;
+        }
+
+        .howto-content ol,
+        .howto-content ul {
+            padding-left: 1.2rem;
+            margin: 0.3rem 0;
+        }
+
+        .howto-content li { margin-bottom: 0.3rem; }
+
+        .howto-content code {
+            background: #222;
+            padding: 0.1rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.78rem;
+            color: #ccc;
+        }
+
+        .howto-content .tip {
+            background: #1e1b4b;
+            border: 1px solid #312e81;
+            border-radius: 8px;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.8rem;
+            color: #a5b4fc;
+            margin-top: 0.8rem;
+        }
+
         /* Compiled rules preview */
         .compiled-preview {
             display: none;
@@ -436,17 +513,45 @@ HTML = r"""
     <p class="subtitle">Formatiere Skripte einheitlich per Drag & Drop</p>
 
     <div class="container">
+        <!-- How-To -->
+        <div class="howto-card">
+            <div class="howto-toggle" onclick="toggleHowTo()">
+                <span class="arrow" id="howtoArrow">▶</span>
+                So funktioniert's
+            </div>
+            <div id="howtoContent" class="howto-content">
+                <h3>In 3 Schritten zum formatierten Skript</h3>
+                <ol>
+                    <li><strong>Regeln schreiben</strong> — Beschreibe im Textfeld, wie dein Dokument aussehen soll. Schriftart, Schriftgröße, Farben, Zeilenabstand — alles in normalem Deutsch.</li>
+                    <li><strong>"Regeln kompilieren" klicken</strong> — Eine KI wandelt deine Beschreibung einmalig in technische Formatierungsregeln um. Das passiert nur einmal, nicht bei jeder Datei.</li>
+                    <li><strong>.docx-Dateien reinziehen</strong> — Zieh deine Word-Dateien in das Feld unten oder klick drauf. Die formatierte Version wird automatisch heruntergeladen.</li>
+                </ol>
+
+                <h3>Regeln ändern?</h3>
+                <p>Einfach den Text oben anpassen und nochmal "Regeln kompilieren" klicken. Deine Regeln und Einstellungen werden im Browser gespeichert — beim nächsten Besuch ist alles noch da.</p>
+
+                <h3>API-Key Hinweis</h3>
+                <p>Die App nutzt ein inklusives Kontingent zum Kompilieren der Regeln. Falls du eine Meldung bekommst, dass das Limit erreicht ist, kannst du unter "Einstellungen" einen eigenen kostenlosen Gemini API Key eintragen. Den bekommst du hier:</p>
+                <p><a href="https://aistudio.google.com/apikey" target="_blank" style="color: #818cf8;">aistudio.google.com/apikey</a> — Google-Konto reicht, kostet nichts.</p>
+
+                <div class="tip">
+                    <strong>Tipp:</strong> Die KI versteht auch komplexe Regeln — z.B. unterschiedliche Farben pro Rolle, Szenenüberschriften in Versalien, oder kursive Regieanweisungen. Je genauer du beschreibst, desto besser das Ergebnis.
+                </div>
+            </div>
+        </div>
+
         <!-- Settings (collapsible) -->
         <div class="card" style="padding: 1rem 1.5rem;">
             <div class="settings-toggle" onclick="toggleSettings()">
                 <span id="settingsArrow">▶</span> Einstellungen
             </div>
             <div id="settingsPanel" class="settings-panel">
-                <label>Gemini API Key</label>
+                <label>Eigener Gemini API Key (optional)</label>
                 <input type="password" id="apiKey" placeholder="AIza..." value="">
                 <p class="settings-hint">
-                    Wird nur zum Kompilieren der Regeln benötigt. Gespeichert im Browser.
-                    {% if has_env_key %}<br><span style="color:#4ade80;">Server-Key aktiv — dieses Feld ist optional.</span>{% endif %}
+                    Nur nötig, wenn das inklusive Kontingent aufgebraucht ist.<br>
+                    Kostenlos erstellen: <a href="https://aistudio.google.com/apikey" target="_blank" style="color: #818cf8;">aistudio.google.com/apikey</a>
+                    {% if has_env_key %}<br><span style="color:#4ade80;">Inklusiver Server-Key aktiv — dieses Feld ist optional.</span>{% endif %}
                 </p>
             </div>
         </div>
@@ -534,6 +639,14 @@ Der Zeilenabstand ist 1.5.
         }
 
         init();
+
+        // --- How-To toggle ---
+        function toggleHowTo() {
+            const content = document.getElementById('howtoContent');
+            const arrow = document.getElementById('howtoArrow');
+            content.classList.toggle('open');
+            arrow.textContent = content.classList.contains('open') ? '▼' : '▶';
+        }
 
         // --- Settings toggle ---
         function toggleSettings() {
