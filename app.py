@@ -653,7 +653,10 @@ Der Zeilenabstand ist 1.5.
                     enableDropzone();
                     document.getElementById('rulesBadge').className = 'rules-badge active';
                     document.getElementById('rulesBadge').textContent = 'Aktiv';
-                } catch (e) {}
+                } catch (e) {
+                    // Corrupt data (e.g. HTML error page) — purge it
+                    localStorage.removeItem(STORAGE_COMPILED);
+                }
             }
 
             // Auto-save rules text
@@ -718,6 +721,12 @@ Der Zeilenabstand ist 1.5.
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ rules, api_key: apiKey }),
                 });
+
+                // Guard: if server returns HTML (error page), catch it early
+                const contentType = res.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) {
+                    throw new Error('Server hat kein JSON zurückgegeben. Bitte Seite neu laden und nochmal versuchen.');
+                }
 
                 const data = await res.json();
 
