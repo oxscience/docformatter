@@ -103,11 +103,31 @@ HINWEISE ZUR INTERPRETATION:
 - "kursiv" = italic: true
 - "eingerückt" = text_indent_cm: 1.27 (Standard-Einrückung)
 - "linksbündig/rechtsbündig/zentriert" = alignment
-- Bei Dialogregeln: Wenn die Regeln sagen, dass Rollennamen farbig sind, setze name_color. Wenn der Dialog-TEXT farbig ist, setze text_color.
+
+WICHTIG - SKRIPTFORMAT:
+- In Hörspiel-Skripten stehen Rollennamen auf EIGENEN Zeilen (z.B. "ERZÄHLER" allein auf einer Zeile), der Dialogtext folgt in den nächsten Zeilen.
+- Das ist NICHT das Format "NAME: Text" auf einer Zeile!
+- Der Formatter erkennt Rollennamen automatisch anhand der character_colors-Liste.
+- name_color = Farbe des Rollennamens (die Zeile mit dem Namen)
+- text_color = Farbe des Dialogs (die Zeilen NACH dem Namen). Default = defaults.color (schwarz).
+- text_italic, text_indent_cm = gelten für den Dialog-Text nach dem Namen.
+
+FARB-INTERPRETATION:
+- Wenn die Regeln sagen "die Rolle steht in folgender Farbe" → name_color setzen.
+- Wenn die Regeln sagen "der Text/Redebeitrag steht in folgender Farbe" → text_color setzen.
+- Lies die Regeln genau: "steht die Rolle, nicht aber ihr Text, in folgender Farbe" = name_color.
+- "steht nicht die Rolle, aber ihr Text in folgender Farbe" = text_color.
+
+PARAGRAPH-RULES NAMING:
+- Verwende beschreibende deutsche Namen die folgende Schlüsselwörter enthalten:
+  - "Serientitel" oder "Titel" für den Seriennamen
+  - "Folge" oder "Episode" für Folgenbezeichnungen
+  - "Szene" oder "Scene" für Szenenüberschriften
+  - "Zeit" oder "Kumuliert" für Zeitangaben
 - paragraph_rules werden in Reihenfolge geprüft, erste Übereinstimmung gewinnt.
 - "first_contains" = nur die erste Stelle im Dokument die passt.
-- Für inline_rules: Patterns sollten Textteile INNERHALB von Absätzen matchen (z.B. Klammern, bestimmte Wörter).
-- SFX und ATM Anweisungen in Klammern sind Regieanweisungen.
+- Für inline_rules: Patterns sollten Textteile INNERHALB von Absätzen matchen.
+- SFX/ATM und Regieanweisungen in eckigen Klammern [] werden vom Formatter automatisch erkannt und kursiv gesetzt.
 
 Benutzer-Regeln:
 ---
