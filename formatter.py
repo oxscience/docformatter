@@ -435,6 +435,12 @@ def format_document(source_path, compiled_rules):
     # Spacing after character name (in pt). 0.5 line at 12pt ≈ 6pt
     name_space_after = compiled_rules.get("character_name_space_after_pt", 6)
 
+    # Line spacing between character name and dialogue (default 0.5 = tight)
+    name_line_spacing = compiled_rules.get("character_name_line_spacing", 0.5)
+
+    # Whether to merge stage directions onto character name line
+    merge_stage_dir = compiled_rules.get("merge_stage_direction_after_name", True)
+
     # Stage direction / SFX / bracket size (default to d_size, can be overridden)
     stage_dir_size = compiled_rules.get("stage_direction_size", d_size)
 
@@ -467,9 +473,27 @@ def format_document(source_path, compiled_rules):
     for rule in paragraph_rules:
         rule_formats[rule.get("name", "")] = rule.get("format", {})
 
+    # Pre-pass: identify stage directions to merge onto character name lines
+    # When a T_STAGE_DIR immediately follows a T_CHARACTER (possibly with T_EMPTY between),
+    # mark it to be merged onto the character name line.
+    merge_into_name = set()  # indices of stage dirs to merge
+    if merge_stage_dir:
+        for idx, (pt, sp) in enumerate(classifications):
+            if pt == T_CHARACTER:
+                # Look ahead for immediately following stage direction
+                next_idx = idx + 1
+                while next_idx < len(classifications) and classifications[next_idx][0] == T_EMPTY:
+                    next_idx += 1
+                if next_idx < len(classifications) and classifications[next_idx][0] == T_STAGE_DIR:
+                    merge_into_name.add(next_idx)
+
     for i, (ptype, speaker) in enumerate(classifications):
         text = texts[i]
         stripped = text.strip()
+
+        # Skip stage directions that were merged onto the character name line
+        if i in merge_into_name:
+            continue
 
         # Apply bracket conversion
         stripped = _convert_brackets(stripped, compiled_rules)
@@ -561,11 +585,25 @@ def format_document(source_path, compiled_rules):
             name_upper = name_format.get("uppercase", True)
 
             # Character name is NEVER indented — only dialogue text gets indent
+            # Use tight line spacing so dialogue "sticks" to the name
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing, space_after_pt=name_space_after)
+            _format_paragraph(p, d_align, name_line_spacing, space_after_pt=name_space_after)
             display = stripped.upper() if name_upper else stripped
             run = p.add_run(display)
             _format_run(run, d_font, d_size, name_bold, False, name_color)
+
+            # Merge stage direction onto same line if flagged
+            if merge_stage_dir:
+                next_idx = i + 1
+                while next_idx < len(classifications) and classifications[next_idx][0] == T_EMPTY:
+                    next_idx += 1
+                if next_idx in merge_into_name:
+                    dir_text = texts[next_idx].strip()
+                    dir_text = _convert_brackets(dir_text, compiled_rules)
+                    run_space = p.add_run(" ")
+                    _format_run(run_space, d_font, d_size, False, False, name_color)
+                    run_dir = p.add_run(dir_text)
+                    _format_run(run_dir, d_font, stage_dir_size, False, True, d_color)
             continue
 
         # --- DIALOGUE ---

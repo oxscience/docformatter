@@ -41,7 +41,9 @@ JSON-Schema:
     "line_spacing": 1.5
   },
   "convert_brackets_to_round": "true wenn eckige Klammern [] zu runden Klammern () konvertiert werden sollen (boolean, default false)",
-  "character_name_space_after_pt": "Abstand in pt zwischen Rollenname und Dialogtext (number, default 6 = halbe Zeile)",
+  "character_name_space_after_pt": "Abstand in pt zwischen Rollenname und Dialogtext (number, default 0)",
+  "character_name_line_spacing": "Zeilenabstand des Rollenname-Absatzes (number, default 0.5 = eng, Fließtext bleibt bei line_spacing)",
+  "merge_stage_direction_after_name": "true wenn Regieanweisungen direkt nach Rollenname auf dieselbe Zeile gezogen werden sollen (boolean, default true)",
   "stage_direction_size": "Schriftgröße in pt für Regieanweisungen, SFX, ATM und Klammer-Anweisungen (number, default = defaults.size)",
   "filename_suffix_date": "true wenn Datum im Dateinamen gewünscht (boolean)",
   "filename_date_format": "DDMM|MMDD|YYYYMMDD",
@@ -112,6 +114,8 @@ HINWEISE ZUR INTERPRETATION:
 - "halbe Zeile Abstand" / "0.5 Zeilenabstand" = space_before_pt: 6 (bei 12pt Schrift)
 - "eckige Klammern zu runden" = convert_brackets_to_round: true
 - "Regieanweisungen Größe 9" = stage_direction_size: 9
+- "Regieanweisungen nach Rolle auf gleiche Zeile" = merge_stage_direction_after_name: true
+- "Text soll am Rollennamen kleben" / "enger Abstand nach Rolle" = character_name_line_spacing: 0.5, character_name_space_after_pt: 0
 
 WICHTIG - SKRIPTFORMAT:
 - In Hörspiel-Skripten stehen Rollennamen auf EIGENEN Zeilen (z.B. "ERZÄHLER" allein auf einer Zeile), der Dialogtext folgt in den nächsten Zeilen.
