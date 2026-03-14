@@ -40,6 +40,9 @@ JSON-Schema:
     "alignment": "left|center|right|justify",
     "line_spacing": 1.5
   },
+  "convert_brackets_to_round": "true wenn eckige Klammern [] zu runden Klammern () konvertiert werden sollen (boolean, default false)",
+  "character_name_space_after_pt": "Abstand in pt zwischen Rollenname und Dialogtext (number, default 6 = halbe Zeile)",
+  "stage_direction_size": "Schriftgröße in pt für Regieanweisungen, SFX, ATM und Klammer-Anweisungen (number, default = defaults.size)",
   "filename_suffix_date": "true wenn Datum im Dateinamen gewünscht (boolean)",
   "filename_date_format": "DDMM|MMDD|YYYYMMDD",
   "page_numbers": {
@@ -59,8 +62,10 @@ JSON-Schema:
         "bold": "boolean (optional)",
         "italic": "boolean (optional)",
         "uppercase": "boolean (optional)",
+        "underline": "boolean (optional, Unterstreichung)",
         "color": "#RRGGBB (optional)",
-        "alignment": "left|center|right (optional)"
+        "alignment": "left|center|right (optional)",
+        "space_before_pt": "Abstand vor dem Absatz in pt (number, optional)"
       }
     }
   ],
@@ -102,7 +107,11 @@ HINWEISE ZUR INTERPRETATION:
 - "fett" = bold: true
 - "kursiv" = italic: true
 - "eingerückt" = text_indent_cm: 1.27 (Standard-Einrückung)
+- "unterstrichen" = underline: true
 - "linksbündig/rechtsbündig/zentriert" = alignment
+- "halbe Zeile Abstand" / "0.5 Zeilenabstand" = space_before_pt: 6 (bei 12pt Schrift)
+- "eckige Klammern zu runden" = convert_brackets_to_round: true
+- "Regieanweisungen Größe 9" = stage_direction_size: 9
 
 WICHTIG - SKRIPTFORMAT:
 - In Hörspiel-Skripten stehen Rollennamen auf EIGENEN Zeilen (z.B. "ERZÄHLER" allein auf einer Zeile), der Dialogtext folgt in den nächsten Zeilen.

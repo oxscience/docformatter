@@ -43,6 +43,15 @@ ALIGNMENT_MAP = {
 }
 
 
+# ─── Text transformations ────────────────────────────────────────────────────
+
+def _convert_brackets(text, compiled_rules):
+    """Convert square brackets to round brackets if configured."""
+    if compiled_rules.get("convert_brackets_to_round", False):
+        text = text.replace("[", "(").replace("]", ")")
+    return text
+
+
 # ─── Low-level formatting helpers ────────────────────────────────────────────
 
 def _set_font_on_run(run, font_name):
@@ -57,12 +66,13 @@ def _set_font_on_run(run, font_name):
         rFonts.set(qn(f"w:{attr}"), font_name)
 
 
-def _format_run(run, font, size_pt, bold, italic, color_hex):
+def _format_run(run, font, size_pt, bold, italic, color_hex, underline=False):
     """Apply all formatting to a run."""
     _set_font_on_run(run, font)
     run.font.size = Pt(size_pt)
     run.font.bold = bold
     run.font.italic = italic
+    run.font.underline = underline
     run.font.color.rgb = hex_to_rgb(color_hex)
     run.font.highlight_color = None
 
@@ -168,10 +178,8 @@ def _is_character_name(text, known_characters):
         return True
 
     # Heuristic: all uppercase, no punctuation except periods/spaces
-    # Matches patterns like "ERZÄHLER", "DR. KHOURY", "FRAU FISCHER", "OMA STEIN"
     clean = stripped.replace(".", "").replace(" ", "").replace("-", "")
     if clean and clean.upper() == clean and clean.isalpha():
-        # Additional check: not a scene heading or SFX
         upper = stripped.upper()
         if any(upper.startswith(x) for x in ["SZENE", "SFX", "ATM", "LEIT"]):
             return False
@@ -192,7 +200,6 @@ def classify_paragraphs(texts, compiled_rules):
 
     classifications = []
     first_match_tracker = set()
-    title_found = False
 
     for i, text in enumerate(texts):
         stripped = text.strip()
@@ -234,46 +241,46 @@ def classify_paragraphs(texts, compiled_rules):
             elif "zeit" in name or "time" in name or "kumuliert" in name:
                 classifications.append((T_TIME, None))
             else:
-                # Generic paragraph rule — classify as body with formatting
                 classifications.append((f"rule:{matched_rule.get('name', '')}", None))
             continue
 
         # --- Hardcoded structural patterns ---
 
-        # Time marker: [Kumulierte Zeit: ...]
-        if re.match(r"^\[Kumulierte\s+Zeit", stripped, re.IGNORECASE):
+        # Time marker
+        if re.match(r"^\[Kumulierte\s+Zeit", stripped, re.IGNORECASE) or \
+           re.match(r"^\(Kumulierte\s+Zeit", stripped, re.IGNORECASE):
             classifications.append((T_TIME, None))
             continue
 
-        # Scene heading: starts with "SZENE" or "Szene" + digit
+        # Scene heading
         if re.match(r"^SZENE\s+\d+|^Szene\s+\d+", stripped):
             classifications.append((T_SCENE, None))
             continue
 
-        # Episode: "Folge" + digit
-        if re.match(r".*Folge\s+\d+", stripped, re.IGNORECASE) and not title_found:
-            # Could be episode line
+        # Episode
+        if re.match(r".*Folge\s+\d+", stripped, re.IGNORECASE):
             classifications.append((T_EPISODE, None))
             continue
 
-        # SFX/ATM in brackets
-        if re.match(r"^\[(SFX|ATM|TITELSONG|OUTRO)", stripped, re.IGNORECASE):
+        # SFX/ATM in brackets (both [] and ())
+        if re.match(r"^[\[\(](SFX|ATM|TITELSONG|OUTRO)", stripped, re.IGNORECASE):
             classifications.append((T_SFX_ATM, None))
             continue
 
         # LEIT-OBJEKT in brackets
-        if re.match(r"^\[LEIT-OBJEKT", stripped, re.IGNORECASE):
+        if re.match(r"^[\[\(]LEIT-OBJEKT", stripped, re.IGNORECASE):
             classifications.append((T_LEIT, None))
             continue
 
-        # PICO-STOP or other bracket directions
-        if stripped.startswith("[") and stripped.endswith("]"):
-            classifications.append((T_BRACKET, None))
-            continue
-
-        # Stage direction: entire line in parentheses
-        if stripped.startswith("(") and stripped.endswith(")"):
-            classifications.append((T_STAGE_DIR, None))
+        # Other bracket/paren directions (full line enclosed)
+        if (stripped.startswith("[") and stripped.endswith("]")) or \
+           (stripped.startswith("(") and stripped.endswith(")")):
+            # Check if it's a stage direction (short, in parens)
+            # or a bracket direction (longer, descriptive)
+            if stripped.startswith("(") and stripped.endswith(")"):
+                classifications.append((T_STAGE_DIR, None))
+            else:
+                classifications.append((T_BRACKET, None))
             continue
 
         # Character name (standalone line)
@@ -295,7 +302,7 @@ def classify_paragraphs(texts, compiled_rules):
         elif ptype == T_EMPTY:
             result.append((T_EMPTY, current_speaker))
         elif ptype in (T_SCENE, T_TITLE, T_EPISODE):
-            current_speaker = None  # Reset speaker at structural boundaries
+            current_speaker = None
             result.append((ptype, None))
         elif ptype == T_BODY:
             if current_speaker:
@@ -318,12 +325,10 @@ def _get_character_color(character_name, dialogue_rules, unknown_tracker):
     """Get the color config for a character."""
     char_colors = dialogue_rules.get("character_colors", {})
 
-    # Try exact match (case-insensitive)
     for name, config in char_colors.items():
         if name.upper() == character_name.upper():
             return config
 
-    # Unknown character — assign from secondary shades
     upper = character_name.upper()
     if upper not in unknown_tracker:
         shades = dialogue_rules.get("secondary_shades", ["#0000FF", "#4169E1", "#1E90FF", "#00BFFF"])
@@ -342,11 +347,12 @@ def _get_character_color(character_name, dialogue_rules, unknown_tracker):
 
 
 def _add_text_with_inline_formatting(para, text, base_font, base_size, base_bold,
-                                      base_italic, base_color, inline_rules):
+                                      base_italic, base_color, inline_rules,
+                                      base_underline=False):
     """Add text to paragraph, applying inline rules (e.g., italic for parentheses)."""
     if not inline_rules:
         run = para.add_run(text)
-        _format_run(run, base_font, base_size, base_bold, base_italic, base_color)
+        _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
         return
 
     # Find all inline matches
@@ -363,7 +369,7 @@ def _add_text_with_inline_formatting(para, text, base_font, base_size, base_bold
 
     if not matches:
         run = para.add_run(text)
-        _format_run(run, base_font, base_size, base_bold, base_italic, base_color)
+        _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
         return
 
     # Sort and filter overlaps
@@ -380,7 +386,7 @@ def _add_text_with_inline_formatting(para, text, base_font, base_size, base_bold
     for start, end, fmt in filtered:
         if start > pos:
             run = para.add_run(text[pos:start])
-            _format_run(run, base_font, base_size, base_bold, base_italic, base_color)
+            _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
 
         seg_text = text[start:end]
         if fmt.get("uppercase"):
@@ -393,18 +399,18 @@ def _add_text_with_inline_formatting(para, text, base_font, base_size, base_bold
             fmt.get("bold", base_bold),
             fmt.get("italic", base_italic),
             fmt.get("color", base_color),
+            fmt.get("underline", base_underline),
         )
         pos = end
 
     if pos < len(text):
         run = para.add_run(text[pos:])
-        _format_run(run, base_font, base_size, base_bold, base_italic, base_color)
+        _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
 
 
 def format_document(source_path, compiled_rules):
     """
     Apply compiled rules to a document by rebuilding from scratch.
-
     Returns bytes of the formatted .docx.
     """
     defaults = compiled_rules.get("defaults", {
@@ -425,6 +431,12 @@ def format_document(source_path, compiled_rules):
     paragraph_rules = compiled_rules.get("paragraph_rules", [])
     scene_blank = compiled_rules.get("scene_blank_lines", 0)
     name_format = dialogue_rules.get("name_format", {"bold": True, "uppercase": True})
+
+    # Spacing after character name (in pt). 0.5 line at 12pt ≈ 6pt
+    name_space_after = compiled_rules.get("character_name_space_after_pt", 6)
+
+    # Stage direction / SFX / bracket size (default to d_size, can be overridden)
+    stage_dir_size = compiled_rules.get("stage_direction_size", d_size)
 
     # Read source
     source = Document(source_path)
@@ -459,6 +471,9 @@ def format_document(source_path, compiled_rules):
         text = texts[i]
         stripped = text.strip()
 
+        # Apply bracket conversion
+        stripped = _convert_brackets(stripped, compiled_rules)
+
         # --- EMPTY ---
         if ptype == T_EMPTY:
             p = doc.add_paragraph()
@@ -467,34 +482,38 @@ def format_document(source_path, compiled_rules):
 
         # --- TITLE (series name) ---
         if ptype == T_TITLE:
-            # Extra blank lines before scenes
-            if scene_blank and i > 0:
-                for _ in range(scene_blank):
-                    bp = doc.add_paragraph()
-                    _format_paragraph(bp, d_align, d_spacing)
-
-            fmt = _find_rule_format("titel", paragraph_rules) or _find_rule_format("title", paragraph_rules) or _find_rule_format("serien", paragraph_rules)
+            fmt = _find_rule_format("titel", paragraph_rules) or \
+                  _find_rule_format("title", paragraph_rules) or \
+                  _find_rule_format("serien", paragraph_rules)
             size = fmt.get("size", 20) if fmt else 20
             bold = fmt.get("bold", True) if fmt else True
             upper = fmt.get("uppercase", True) if fmt else True
+            underline = fmt.get("underline", False) if fmt else False
 
             p = doc.add_paragraph()
             _format_paragraph(p, fmt.get("alignment", d_align) if fmt else d_align, d_spacing)
             display = stripped.upper() if upper else stripped
             run = p.add_run(display)
-            _format_run(run, d_font, size, bold, False, d_color)
+            _format_run(run, d_font, size, bold, False, d_color, underline)
             continue
 
         # --- EPISODE ---
         if ptype == T_EPISODE:
-            fmt = _find_rule_format("folge", paragraph_rules) or _find_rule_format("episode", paragraph_rules)
+            fmt = _find_rule_format("folge", paragraph_rules) or \
+                  _find_rule_format("episode", paragraph_rules)
             size = fmt.get("size", 16) if fmt else 16
             bold = fmt.get("bold", True) if fmt else True
+            upper = fmt.get("uppercase", False) if fmt else False
+            underline = fmt.get("underline", False) if fmt else False
+
+            # Space before episode line (e.g., 0.5 line = 6pt)
+            space_before = fmt.get("space_before_pt") if fmt else None
 
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing)
-            run = p.add_run(stripped)
-            _format_run(run, d_font, size, bold, False, d_color)
+            _format_paragraph(p, d_align, d_spacing, space_before_pt=space_before)
+            display = stripped.upper() if upper else stripped
+            run = p.add_run(display)
+            _format_run(run, d_font, size, bold, False, d_color, underline)
             continue
 
         # --- SCENE HEADING ---
@@ -505,21 +524,25 @@ def format_document(source_path, compiled_rules):
                     bp = doc.add_paragraph()
                     _format_paragraph(bp, d_align, d_spacing)
 
-            fmt = _find_rule_format("szene", paragraph_rules) or _find_rule_format("scene", paragraph_rules)
+            fmt = _find_rule_format("szene", paragraph_rules) or \
+                  _find_rule_format("scene", paragraph_rules)
             size = fmt.get("size", 13) if fmt else 13
             bold = fmt.get("bold", True) if fmt else True
             upper = fmt.get("uppercase", True) if fmt else True
+            underline = fmt.get("underline", False) if fmt else False
 
             p = doc.add_paragraph()
             _format_paragraph(p, d_align, d_spacing)
             display = stripped.upper() if upper else stripped
             run = p.add_run(display)
-            _format_run(run, d_font, size, bold, False, d_color)
+            _format_run(run, d_font, size, bold, False, d_color, underline)
             continue
 
         # --- TIME MARKER ---
         if ptype == T_TIME:
-            fmt = _find_rule_format("zeit", paragraph_rules) or _find_rule_format("time", paragraph_rules) or _find_rule_format("kumuliert", paragraph_rules)
+            fmt = _find_rule_format("zeit", paragraph_rules) or \
+                  _find_rule_format("time", paragraph_rules) or \
+                  _find_rule_format("kumuliert", paragraph_rules)
             size = fmt.get("size", 9) if fmt else 9
             italic = fmt.get("italic", True) if fmt else True
             align = fmt.get("alignment", "right") if fmt else "right"
@@ -537,11 +560,9 @@ def format_document(source_path, compiled_rules):
             name_bold = name_format.get("bold", True)
             name_upper = name_format.get("uppercase", True)
 
-            # Check if this character has indent (e.g., Erzähler)
-            indent = char_config.get("text_indent_cm", None)
-
+            # Character name is NEVER indented — only dialogue text gets indent
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing, indent_cm=indent)
+            _format_paragraph(p, d_align, d_spacing, space_after_pt=name_space_after)
             display = stripped.upper() if name_upper else stripped
             run = p.add_run(display)
             _format_run(run, d_font, d_size, name_bold, False, name_color)
@@ -563,7 +584,7 @@ def format_document(source_path, compiled_rules):
 
         # --- STAGE DIRECTION (in parentheses, own line) ---
         if ptype == T_STAGE_DIR:
-            # Check if current speaker has special indent
+            # Stage directions get indent if current speaker has it
             indent = None
             if speaker:
                 char_config = _get_character_color(speaker, dialogue_rules, unknown_chars)
@@ -572,7 +593,7 @@ def format_document(source_path, compiled_rules):
             p = doc.add_paragraph()
             _format_paragraph(p, d_align, d_spacing, indent_cm=indent)
             run = p.add_run(stripped)
-            _format_run(run, d_font, d_size, False, True, d_color)
+            _format_run(run, d_font, stage_dir_size, False, True, d_color)
             continue
 
         # --- SFX/ATM ---
@@ -580,7 +601,7 @@ def format_document(source_path, compiled_rules):
             p = doc.add_paragraph()
             _format_paragraph(p, d_align, d_spacing)
             run = p.add_run(stripped)
-            _format_run(run, d_font, d_size, False, True, d_color)
+            _format_run(run, d_font, stage_dir_size, False, True, d_color)
             continue
 
         # --- LEIT-OBJEKT ---
@@ -588,7 +609,6 @@ def format_document(source_path, compiled_rules):
             p = doc.add_paragraph()
             _format_paragraph(p, d_align, d_spacing)
 
-            # Find "LEIT-OBJEKT" or "Leit-Objekt" in text and make it bold+uppercase
             leit_match = re.search(r"LEIT-OBJEKT|Leit-[Oo]bjekt", stripped, re.IGNORECASE)
             if leit_match:
                 before = stripped[:leit_match.start()]
@@ -597,17 +617,17 @@ def format_document(source_path, compiled_rules):
 
                 if before:
                     run = p.add_run(before)
-                    _format_run(run, d_font, d_size, False, True, d_color)
+                    _format_run(run, d_font, stage_dir_size, False, True, d_color)
 
                 run = p.add_run(leit_text.upper())
-                _format_run(run, d_font, d_size, True, True, d_color)
+                _format_run(run, d_font, stage_dir_size, True, True, d_color)
 
                 if after:
                     run = p.add_run(after)
-                    _format_run(run, d_font, d_size, False, True, d_color)
+                    _format_run(run, d_font, stage_dir_size, False, True, d_color)
             else:
                 run = p.add_run(stripped)
-                _format_run(run, d_font, d_size, False, True, d_color)
+                _format_run(run, d_font, stage_dir_size, False, True, d_color)
             continue
 
         # --- BRACKET DIRECTION ---
@@ -615,7 +635,7 @@ def format_document(source_path, compiled_rules):
             p = doc.add_paragraph()
             _format_paragraph(p, d_align, d_spacing)
             run = p.add_run(stripped)
-            _format_run(run, d_font, d_size, False, True, d_color)
+            _format_run(run, d_font, stage_dir_size, False, True, d_color)
             continue
 
         # --- Matched paragraph rule ---
@@ -634,6 +654,7 @@ def format_document(source_path, compiled_rules):
                 fmt.get("bold", d_bold),
                 fmt.get("italic", d_italic),
                 fmt.get("color", d_color),
+                fmt.get("underline", False),
             )
             continue
 
