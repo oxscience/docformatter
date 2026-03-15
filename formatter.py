@@ -1,8 +1,16 @@
 """
 Hedda & Pico Skript-Formatter — hardcoded Formatierung für Hörspiel-Manuskripte.
 
+Tested against all 7 Folgen (01–06, 12) with varying input formats:
+- Some have empty lines between every paragraph, others have none
+- Some use [square brackets], others use (round) — all get normalized
+- Some have SFX/ATM prefix, others have bare [description] for sounds
+- Folge 04 starts with empty paragraph + uses "Text A" style
+- PICO-STOP is a special direction type
+- LEIT-OBJEKT has many variants (EINFÜHRUNG, HÖHEPUNKT, WENDEPUNKT, etc.)
+
 Two-pass approach:
-1. Classify every paragraph (title, episode, scene, character, dialogue, etc.)
+1. Classify every paragraph
 2. Format based on classification + speaker context
 """
 
@@ -22,14 +30,14 @@ FONT = "Calibri"
 BODY_SIZE = 12
 LINE_SPACING = 1.5
 NAME_LINE_SPACING = 1.0       # single spacing on name line (0.5 clips text in Word Desktop)
-STAGE_DIR_SIZE = 9             # Regieanweisungen, SFX, ATM
+STAGE_DIR_SIZE = 9             # Regieanweisungen, SFX, ATM, PICO-STOP
 TITLE_SIZE = 48                # "HEDDA & PICO"
 EPISODE_SIZE = 26              # "Folge X: ..."
 SCENE_SIZE = 13                # "SZENE 1: ..."
 TIME_SIZE = 9                  # kumulierte Zeit
 PAGE_NUM_SIZE = 9
 
-# Character colors (name_color only — text stays black unless specified)
+# Character colors (name_color only — dialogue text stays black unless specified)
 CHARACTER_COLORS = {
     "ERZÄHLER":     {"name_color": "#000000", "text_italic": True, "text_indent_cm": 1.27},
     "WENDT":        {"name_color": "#00B050"},
@@ -43,6 +51,12 @@ CHARACTER_COLORS = {
 
 CASE_CHARACTER_COLOR = "#800080"  # lila
 BLUE_SHADES = ["#0000FF", "#00008B", "#4169E1", "#1E90FF", "#00BFFF", "#87CEEB"]
+
+# Prefixes that are NEVER character names
+NOT_CHARACTER_PREFIXES = (
+    "SZENE", "SFX", "ATM", "LEIT", "OUTRO", "TITELSONG", "PICO-STOP",
+    "HEDDA &",  # title line
+)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -131,14 +145,14 @@ def _brackets_to_round(text):
 T_EMPTY = "empty"
 T_TITLE = "title"
 T_EPISODE = "episode"
+T_SUBTITLE = "subtitle"   # "30-Minuten Kinder-Hörspiel-Manuskript"
 T_SCENE = "scene"
 T_CHARACTER = "character"
 T_DIALOGUE = "dialogue"
 T_STAGE_DIR = "stage_dir"
-T_SFX_ATM = "sfx_atm"
+T_SFX_ATM = "sfx_atm"     # SFX, ATM, TITELSONG, OUTRO, PICO-STOP
 T_TIME = "time"
 T_LEIT = "leit"
-T_BRACKET = "bracket"
 T_BODY = "body"
 
 
@@ -147,68 +161,105 @@ def _known_names():
 
 
 def _is_character(text, known):
+    """Check if text is a standalone character name line."""
     s = text.strip()
     if not s or len(s.split()) > 5:
         return False
-    if s.upper() in known:
+
+    upper = s.upper()
+
+    # Reject known non-character prefixes
+    for prefix in NOT_CHARACTER_PREFIXES:
+        if upper.startswith(prefix):
+            return False
+
+    # Exact match against known characters
+    if upper in known:
         return True
+
+    # Heuristic: all uppercase, short, no special punctuation
+    # Handles unknown characters like "KINDER", "JONAS", "LINA" etc.
     clean = s.replace(".", "").replace(" ", "").replace("-", "")
     if clean and clean == clean.upper() and clean.isalpha():
-        if any(s.upper().startswith(x) for x in ("SZENE", "SFX", "ATM", "LEIT", "OUTRO", "TITELSONG")):
-            return False
         return True
+
     return False
 
 
 def _classify(texts):
+    """
+    Classify every paragraph. Handles all known Folge formats:
+    - With/without empty lines between paragraphs
+    - Square brackets and round brackets
+    - With/without SFX/ATM prefix
+    - Leading empty paragraphs (Folge 04)
+    - Subtitle line (Folge 04)
+    """
     known = _known_names()
     result = []
     title_seen = False
+    episode_seen = False
 
     for text in texts:
         s = text.strip()
 
+        # Empty
         if not s:
             result.append((T_EMPTY, None))
             continue
 
+        # Title — first line containing "Hedda" and "Pico"
         if not title_seen and re.search(r"Hedda.*Pico|HEDDA.*PICO", s, re.IGNORECASE):
             title_seen = True
             result.append((T_TITLE, None))
             continue
 
+        # Episode — "Folge N: ..."
+        if not episode_seen and re.match(r".*Folge\s+\d+", s, re.IGNORECASE):
+            episode_seen = True
+            result.append((T_EPISODE, None))
+            continue
+
+        # Subtitle — "30-Minuten Kinder-Hörspiel-Manuskript" (only Folge 04)
+        if title_seen and not episode_seen and re.match(r"\d+-Minuten", s, re.IGNORECASE):
+            result.append((T_SUBTITLE, None))
+            continue
+
+        # Time marker — [Kumulierte Zeit: ...] or (Kumulierte Zeit: ...)
         if re.match(r"^[\[\(]?\s*Kumulierte\s+Zeit", s, re.IGNORECASE):
             result.append((T_TIME, None))
             continue
 
+        # Scene heading — SZENE N: ...
         if re.match(r"^SZENE\s+\d+|^Szene\s+\d+", s):
             result.append((T_SCENE, None))
             continue
 
-        if re.match(r".*Folge\s+\d+", s, re.IGNORECASE):
-            result.append((T_EPISODE, None))
-            continue
-
-        if re.match(r"^[\[\(]\s*(SFX|ATM|TITELSONG|OUTRO)", s, re.IGNORECASE):
+        # SFX/ATM/TITELSONG/OUTRO/PICO-STOP — with prefix in brackets
+        if re.match(r"^[\[\(]\s*(SFX|ATM|TITELSONG|OUTRO|PICO-STOP)", s, re.IGNORECASE):
             result.append((T_SFX_ATM, None))
             continue
 
-        if re.match(r"^[\[\(]\s*LEIT-OBJEKT", s, re.IGNORECASE):
+        # LEIT-OBJEKT — all variants (EINFÜHRUNG, HÖHEPUNKT, WENDEPUNKT, etc.)
+        if re.search(r"LEIT-OBJEKT", s, re.IGNORECASE):
             result.append((T_LEIT, None))
             continue
 
+        # Full-line brackets/parens — stage directions or sound descriptions
         if (s.startswith("[") and s.endswith("]")) or \
            (s.startswith("(") and s.endswith(")")):
             result.append((T_STAGE_DIR, None))
             continue
 
+        # Character name (standalone line, uppercase, short)
         if _is_character(s, known):
             result.append((T_CHARACTER, s.upper()))
             continue
 
+        # Default: body text
         result.append((T_BODY, None))
 
-    # Second pass: assign speaker
+    # ── Second pass: assign speaker context ──
     final = []
     speaker = None
     for ptype, data in result:
@@ -216,11 +267,13 @@ def _classify(texts):
             speaker = data
             final.append((T_CHARACTER, data))
         elif ptype == T_EMPTY:
+            # Empty lines keep current speaker context
             final.append((T_EMPTY, speaker))
-        elif ptype in (T_SCENE, T_TITLE, T_EPISODE):
+        elif ptype in (T_SCENE, T_TITLE, T_EPISODE, T_SUBTITLE):
             speaker = None
             final.append((ptype, None))
         elif ptype == T_BODY:
+            # Body text after a character = dialogue
             final.append((T_DIALOGUE, speaker) if speaker else (T_BODY, None))
         elif ptype == T_STAGE_DIR:
             final.append((T_STAGE_DIR, speaker))
@@ -244,7 +297,6 @@ def _char_config(name, unknown_tracker, case_characters):
         if upper in case_characters:
             unknown_tracker[upper] = {"name_color": CASE_CHARACTER_COLOR}
         else:
-            # Assign blue shades (skip case characters in count)
             blue_count = sum(1 for v in unknown_tracker.values()
                             if v.get("name_color") != CASE_CHARACTER_COLOR)
             idx = blue_count % len(BLUE_SHADES)
@@ -270,6 +322,8 @@ def format_document(source_path, case_characters=None):
     classifications = _classify(texts)
 
     # Pre-pass: find stage directions to merge onto character name line
+    # A stage direction immediately after a character name (possibly with
+    # empty lines between, as in Folge 06/12) gets merged onto the name line
     merge_set = set()
     for idx, (pt, _) in enumerate(classifications):
         if pt == T_CHARACTER:
@@ -294,34 +348,33 @@ def format_document(source_path, case_characters=None):
     for i, (ptype, speaker) in enumerate(classifications):
         text = _brackets_to_round(texts[i].strip())
 
+        # Skip merged stage directions (already on character name line)
         if i in merge_set:
             continue
 
         # ── EMPTY ──
+        # All empty lines between content paragraphs are suppressed.
+        # Spacing is fully controlled by space_before/space_after.
+        # Only exception: one blank line after title+episode block (before first scene).
         if ptype == T_EMPTY:
-            # Look ahead to see what follows these empty lines
-            nxt = i + 1
-            while nxt < len(classifications) and classifications[nxt][0] == T_EMPTY:
-                nxt += 1
-            # Suppress blanks before scenes (scene handler adds its own)
-            if nxt < len(classifications) and classifications[nxt][0] == T_SCENE:
-                continue
-            # Suppress blanks between dialogue blocks — spacing is
-            # handled by space_before/space_after on character names
-            if nxt < len(classifications) and classifications[nxt][0] in (
-                T_CHARACTER, T_DIALOGUE, T_STAGE_DIR, T_SFX_ATM, T_LEIT, T_BRACKET
-            ):
-                continue
-            # Also suppress if the previous real paragraph was dialogue/stage
+            # Keep one blank line between episode/subtitle and first scene
             prev = i - 1
             while prev >= 0 and classifications[prev][0] == T_EMPTY:
                 prev -= 1
-            if prev >= 0 and classifications[prev][0] in (
-                T_CHARACTER, T_DIALOGUE, T_STAGE_DIR, T_SFX_ATM, T_LEIT, T_BRACKET
-            ):
+            nxt = i + 1
+            while nxt < len(classifications) and classifications[nxt][0] == T_EMPTY:
+                nxt += 1
+
+            # Blank between title block (episode/subtitle/body) and scene
+            if prev >= 0 and classifications[prev][0] in (T_EPISODE, T_SUBTITLE, T_BODY) \
+               and nxt < len(classifications) and classifications[nxt][0] == T_SCENE:
+                # Only emit ONE blank, skip duplicates
+                if i == prev + 1:  # first blank in a run
+                    p = doc.add_paragraph()
+                    _fmt_para(p)
                 continue
-            p = doc.add_paragraph()
-            _fmt_para(p)
+
+            # All other blanks: suppress
             continue
 
         # ── TITLE ──
@@ -340,9 +393,20 @@ def format_document(source_path, case_characters=None):
             _fmt_run(run, size=EPISODE_SIZE, bold=True)
             continue
 
+        # ── SUBTITLE (e.g., "30-Minuten Kinder-Hörspiel-Manuskript") ──
+        if ptype == T_SUBTITLE:
+            p = doc.add_paragraph()
+            _fmt_para(p)
+            run = p.add_run(text)
+            _fmt_run(run)
+            continue
+
         # ── SCENE ──
         if ptype == T_SCENE:
-            if i > 0:
+            # Add one blank line before scene, but check if one was already
+            # emitted by the EMPTY handler (title block → scene transition)
+            last_para_text = doc.paragraphs[-1].text.strip() if doc.paragraphs else ""
+            if i > 0 and last_para_text:
                 bp = doc.add_paragraph()
                 _fmt_para(bp)
             p = doc.add_paragraph()
@@ -394,7 +458,7 @@ def format_document(source_path, case_characters=None):
             _fmt_run(run, italic=text_italic, color=text_color)
             continue
 
-        # ── STAGE DIRECTION (standalone) ──
+        # ── STAGE DIRECTION (standalone, on its own line) ──
         if ptype == T_STAGE_DIR:
             indent = None
             if speaker:
@@ -406,10 +470,10 @@ def format_document(source_path, case_characters=None):
             _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # ── SFX/ATM ──
+        # ── SFX/ATM/TITELSONG/OUTRO/PICO-STOP ──
         if ptype == T_SFX_ATM:
             p = doc.add_paragraph()
-            _fmt_para(p)
+            _fmt_para(p, space_after=0)
             run = p.add_run(text)
             _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
             continue
@@ -417,8 +481,9 @@ def format_document(source_path, case_characters=None):
         # ── LEIT-OBJEKT ──
         if ptype == T_LEIT:
             p = doc.add_paragraph()
-            _fmt_para(p)
-            m = re.search(r"LEIT-OBJEKT|Leit-[Oo]bjekt", text, re.IGNORECASE)
+            _fmt_para(p, space_after=0)
+            # Find "LEIT-OBJEKT" in text and make it bold
+            m = re.search(r"LEIT-OBJEKT", text, re.IGNORECASE)
             if m:
                 before = text[:m.start()]
                 leit = text[m.start():m.end()]
@@ -436,17 +501,9 @@ def format_document(source_path, case_characters=None):
                 _fmt_run(r, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # ── BRACKET/OTHER ──
-        if ptype == T_BRACKET:
-            p = doc.add_paragraph()
-            _fmt_para(p)
-            run = p.add_run(text)
-            _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
-            continue
-
         # ── DEFAULT BODY ──
         p = doc.add_paragraph()
-        _fmt_para(p)
+        _fmt_para(p, space_after=0)
         run = p.add_run(text)
         _fmt_run(run)
 
