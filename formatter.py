@@ -349,7 +349,7 @@ def format_document(source_path, case_characters=None):
             name_color = cfg.get("name_color", "#000000")
 
             p = doc.add_paragraph()
-            _fmt_para(p, spacing=NAME_LINE_SPACING, space_after=0)
+            _fmt_para(p, spacing=NAME_LINE_SPACING, space_before=6, space_after=0)
             run = p.add_run(text.upper())
             _fmt_run(run, bold=True, color=name_color)
 
