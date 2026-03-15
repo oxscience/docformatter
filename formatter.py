@@ -299,10 +299,26 @@ def format_document(source_path, case_characters=None):
 
         # ── EMPTY ──
         if ptype == T_EMPTY:
+            # Look ahead to see what follows these empty lines
             nxt = i + 1
             while nxt < len(classifications) and classifications[nxt][0] == T_EMPTY:
                 nxt += 1
+            # Suppress blanks before scenes (scene handler adds its own)
             if nxt < len(classifications) and classifications[nxt][0] == T_SCENE:
+                continue
+            # Suppress blanks between dialogue blocks — spacing is
+            # handled by space_before/space_after on character names
+            if nxt < len(classifications) and classifications[nxt][0] in (
+                T_CHARACTER, T_DIALOGUE, T_STAGE_DIR, T_SFX_ATM, T_LEIT, T_BRACKET
+            ):
+                continue
+            # Also suppress if the previous real paragraph was dialogue/stage
+            prev = i - 1
+            while prev >= 0 and classifications[prev][0] == T_EMPTY:
+                prev -= 1
+            if prev >= 0 and classifications[prev][0] in (
+                T_CHARACTER, T_DIALOGUE, T_STAGE_DIR, T_SFX_ATM, T_LEIT, T_BRACKET
+            ):
                 continue
             p = doc.add_paragraph()
             _fmt_para(p)
