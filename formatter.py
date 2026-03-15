@@ -1,13 +1,9 @@
 """
-DocFormatter Engine — applies compiled formatting rules to .docx documents.
+Hedda & Pico Skript-Formatter — hardcoded Formatierung für Hörspiel-Manuskripte.
 
 Two-pass approach:
-1. Classify every paragraph (title, episode, scene, character name, dialogue,
-   stage direction, SFX/ATM, time marker, etc.)
+1. Classify every paragraph (title, episode, scene, character, dialogue, etc.)
 2. Format based on classification + speaker context
-
-Handles Hörspiel/screenplay format where character names are on SEPARATE lines
-from their dialogue (not "NAME: text" on one line).
 """
 
 from docx import Document
@@ -20,102 +16,94 @@ import io
 from datetime import datetime
 
 
-def hex_to_rgb(hex_color):
-    """Convert #RRGGBB to RGBColor."""
-    hex_color = hex_color.lstrip("#")
-    if len(hex_color) != 6:
-        return RGBColor(0, 0, 0)
+# ─── Hardcoded rules ─────────────────────────────────────────────────────────
+
+FONT = "Calibri"
+BODY_SIZE = 12
+LINE_SPACING = 1.5
+NAME_LINE_SPACING = 0.5       # tight spacing between name and dialogue
+STAGE_DIR_SIZE = 9             # Regieanweisungen, SFX, ATM
+TITLE_SIZE = 48                # "HEDDA & PICO"
+EPISODE_SIZE = 26              # "Folge X: ..."
+SCENE_SIZE = 13                # "SZENE 1: ..."
+TIME_SIZE = 9                  # kumulierte Zeit
+PAGE_NUM_SIZE = 9
+
+# Character colors (name_color only — text stays black unless specified)
+CHARACTER_COLORS = {
+    "ERZÄHLER":     {"name_color": "#000000", "text_italic": True, "text_indent_cm": 1.27},
+    "WENDT":        {"name_color": "#00B050"},
+    "HEDDA":        {"name_color": "#FF8C00"},
+    "FRAU FISCHER": {"name_color": "#C88A00"},
+    "HERR NOVAK":   {"name_color": "#008B8B"},
+    "HERR HASSAN":  {"name_color": "#8B4513"},
+    "OMA STEIN":    {"name_color": "#FF69B4"},
+    "DR. KHOURY":   {"name_color": "#FF0000"},
+}
+
+CASE_CHARACTER_COLOR = "#800080"  # lila
+BLUE_SHADES = ["#0000FF", "#00008B", "#4169E1", "#1E90FF", "#00BFFF", "#87CEEB"]
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _hex_to_rgb(hex_color):
+    h = hex_color.lstrip("#")
     try:
-        return RGBColor(
-            int(hex_color[0:2], 16),
-            int(hex_color[2:4], 16),
-            int(hex_color[4:6], 16),
-        )
+        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
     except (ValueError, IndexError):
         return RGBColor(0, 0, 0)
 
 
-ALIGNMENT_MAP = {
-    "left": WD_ALIGN_PARAGRAPH.LEFT,
-    "center": WD_ALIGN_PARAGRAPH.CENTER,
-    "right": WD_ALIGN_PARAGRAPH.RIGHT,
-    "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
-}
-
-
-# ─── Text transformations ────────────────────────────────────────────────────
-
-def _convert_brackets(text, compiled_rules):
-    """Convert square brackets to round brackets if configured."""
-    if compiled_rules.get("convert_brackets_to_round", False):
-        text = text.replace("[", "(").replace("]", ")")
-    return text
-
-
-# ─── Low-level formatting helpers ────────────────────────────────────────────
-
-def _set_font_on_run(run, font_name):
-    """Set font name on all font slots."""
+def _set_font(run, font_name=FONT):
     run.font.name = font_name
     rPr = run._element.get_or_add_rPr()
     rFonts = rPr.find(qn("w:rFonts"))
     if rFonts is None:
         rFonts = run._element.makeelement(qn("w:rFonts"), {})
         rPr.insert(0, rFonts)
-    for attr in ["ascii", "hAnsi", "eastAsia", "cs"]:
+    for attr in ("ascii", "hAnsi", "eastAsia", "cs"):
         rFonts.set(qn(f"w:{attr}"), font_name)
 
 
-def _format_run(run, font, size_pt, bold, italic, color_hex, underline=False):
-    """Apply all formatting to a run."""
-    _set_font_on_run(run, font)
-    run.font.size = Pt(size_pt)
+def _fmt_run(run, size=BODY_SIZE, bold=False, italic=False, color="#000000", underline=False):
+    _set_font(run)
+    run.font.size = Pt(size)
     run.font.bold = bold
     run.font.italic = italic
     run.font.underline = underline
-    run.font.color.rgb = hex_to_rgb(color_hex)
+    run.font.color.rgb = _hex_to_rgb(color)
     run.font.highlight_color = None
 
 
-def _format_paragraph(para, alignment="left", line_spacing=1.5, indent_cm=None,
-                      space_before_pt=None, space_after_pt=None):
-    """Apply paragraph-level formatting."""
+def _fmt_para(para, align="left", spacing=LINE_SPACING, indent_cm=None,
+              space_before=None, space_after=None):
     pf = para.paragraph_format
-    pf.line_spacing = line_spacing
+    pf.line_spacing = spacing
     pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-
-    if alignment in ALIGNMENT_MAP:
-        pf.alignment = ALIGNMENT_MAP[alignment]
-
+    align_map = {"left": WD_ALIGN_PARAGRAPH.LEFT, "center": WD_ALIGN_PARAGRAPH.CENTER,
+                 "right": WD_ALIGN_PARAGRAPH.RIGHT, "justify": WD_ALIGN_PARAGRAPH.JUSTIFY}
+    if align in align_map:
+        pf.alignment = align_map[align]
     if indent_cm is not None:
         pf.left_indent = Cm(indent_cm)
+    if space_before is not None:
+        pf.space_before = Pt(space_before)
+    if space_after is not None:
+        pf.space_after = Pt(space_after)
 
-    if space_before_pt is not None:
-        pf.space_before = Pt(space_before_pt)
-    if space_after_pt is not None:
-        pf.space_after = Pt(space_after_pt)
 
-
-def _add_page_numbers(doc, rules):
-    """Add page numbers to footer."""
-    pn = rules.get("page_numbers", {})
-    if not pn.get("enabled", False):
-        return
-
+def _add_page_numbers(doc):
     section = doc.sections[0]
     footer = section.footer
     footer.is_linked_to_previous = False
-
     p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
-
-    alignment = pn.get("alignment", "right")
-    if alignment in ALIGNMENT_MAP:
-        p.alignment = ALIGNMENT_MAP[alignment]
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     run = p.add_run()
-    fld_begin = OxmlElement("w:fldChar")
-    fld_begin.set(qn("w:fldCharType"), "begin")
-    run._element.append(fld_begin)
+    fld = OxmlElement("w:fldChar")
+    fld.set(qn("w:fldCharType"), "begin")
+    run._element.append(fld)
 
     run2 = p.add_run()
     instr = OxmlElement("w:instrText")
@@ -124,625 +112,336 @@ def _add_page_numbers(doc, rules):
     run2._element.append(instr)
 
     run3 = p.add_run()
-    fld_end = OxmlElement("w:fldChar")
-    fld_end.set(qn("w:fldCharType"), "end")
-    run3._element.append(fld_end)
+    fld2 = OxmlElement("w:fldChar")
+    fld2.set(qn("w:fldCharType"), "end")
+    run3._element.append(fld2)
 
-    font = rules.get("defaults", {}).get("font", "Arial")
-    size = pn.get("size", 9)
-    for r in [run, run2, run3]:
-        r.font.size = Pt(size)
-        _set_font_on_run(r, font)
+    for r in (run, run2, run3):
+        r.font.size = Pt(PAGE_NUM_SIZE)
+        _set_font(r)
         r.font.color.rgb = RGBColor(0, 0, 0)
 
 
-# ─── Classification pass ─────────────────────────────────────────────────────
+def _brackets_to_round(text):
+    return text.replace("[", "(").replace("]", ")")
 
-# Paragraph types
+
+# ─── Classification ───────────────────────────────────────────────────────────
+
 T_EMPTY = "empty"
-T_TITLE = "title"           # Series name (first occurrence)
-T_EPISODE = "episode"       # "Folge X: ..."
-T_SCENE = "scene"           # "SZENE 1: ..."
-T_CHARACTER = "character"   # Standalone character name line
-T_DIALOGUE = "dialogue"     # Dialogue text (follows character name)
-T_STAGE_DIR = "stage_dir"   # Stage direction in () — own line
-T_SFX_ATM = "sfx_atm"       # [SFX/ATM: ...], [TITELSONG: ...]
-T_TIME = "time_marker"      # [Kumulierte Zeit: ...]
-T_LEIT = "leit_objekt"      # [LEIT-OBJEKT ...]
-T_BRACKET = "bracket_dir"   # Other [stage directions]
-T_BODY = "body"             # Default
+T_TITLE = "title"
+T_EPISODE = "episode"
+T_SCENE = "scene"
+T_CHARACTER = "character"
+T_DIALOGUE = "dialogue"
+T_STAGE_DIR = "stage_dir"
+T_SFX_ATM = "sfx_atm"
+T_TIME = "time"
+T_LEIT = "leit"
+T_BRACKET = "bracket"
+T_BODY = "body"
 
 
-def _build_character_set(compiled_rules):
-    """Extract all known character names from compiled rules."""
-    names = set()
-    dialogue = compiled_rules.get("dialogue_rules", {})
-    for name in dialogue.get("character_colors", {}).keys():
-        names.add(name.upper().strip())
-    return names
+def _known_names():
+    return {n.upper() for n in CHARACTER_COLORS}
 
 
-def _is_character_name(text, known_characters):
-    """Check if a paragraph is a standalone character name line."""
-    stripped = text.strip()
-    if not stripped:
+def _is_character(text, known):
+    s = text.strip()
+    if not s or len(s.split()) > 5:
         return False
-
-    # Must be short (max ~4 words)
-    words = stripped.split()
-    if len(words) > 5:
-        return False
-
-    # Check against known characters (case-insensitive)
-    if stripped.upper() in known_characters:
+    if s.upper() in known:
         return True
-
-    # Heuristic: all uppercase, no punctuation except periods/spaces
-    clean = stripped.replace(".", "").replace(" ", "").replace("-", "")
-    if clean and clean.upper() == clean and clean.isalpha():
-        upper = stripped.upper()
-        if any(upper.startswith(x) for x in ["SZENE", "SFX", "ATM", "LEIT"]):
+    clean = s.replace(".", "").replace(" ", "").replace("-", "")
+    if clean and clean == clean.upper() and clean.isalpha():
+        if any(s.upper().startswith(x) for x in ("SZENE", "SFX", "ATM", "LEIT", "OUTRO", "TITELSONG")):
             return False
         return True
-
     return False
 
 
-def classify_paragraphs(texts, compiled_rules):
-    """
-    First pass: classify every paragraph.
-
-    Returns list of (type, speaker) tuples where speaker is the current
-    character name for dialogue paragraphs.
-    """
-    known_characters = _build_character_set(compiled_rules)
-    paragraph_rules = compiled_rules.get("paragraph_rules", [])
-
-    classifications = []
-    first_match_tracker = set()
-
-    for i, text in enumerate(texts):
-        stripped = text.strip()
-
-        # Empty
-        if not stripped:
-            classifications.append((T_EMPTY, None))
-            continue
-
-        # --- Check paragraph_rules from compiled rules ---
-        matched_rule = None
-        for rule in paragraph_rules:
-            pattern = rule.get("pattern", "")
-            match_type = rule.get("match_type", "regex")
-            flags = re.IGNORECASE if rule.get("case_insensitive", True) else 0
-
-            try:
-                if match_type == "first_contains":
-                    rule_id = rule.get("name", pattern)
-                    if rule_id not in first_match_tracker and re.search(pattern, stripped, flags):
-                        first_match_tracker.add(rule_id)
-                        matched_rule = rule
-                        break
-                elif match_type in ("contains", "starts_with", "regex"):
-                    if re.search(pattern, stripped, flags):
-                        matched_rule = rule
-                        break
-            except re.error:
-                continue
-
-        if matched_rule:
-            name = matched_rule.get("name", "").lower()
-            if "titel" in name or "serien" in name or "title" in name:
-                classifications.append((T_TITLE, None))
-            elif "folge" in name or "episode" in name:
-                classifications.append((T_EPISODE, None))
-            elif "szene" in name or "scene" in name:
-                classifications.append((T_SCENE, None))
-            elif "zeit" in name or "time" in name or "kumuliert" in name:
-                classifications.append((T_TIME, None))
-            else:
-                classifications.append((f"rule:{matched_rule.get('name', '')}", None))
-            continue
-
-        # --- Hardcoded structural patterns ---
-
-        # Time marker
-        if re.match(r"^\[Kumulierte\s+Zeit", stripped, re.IGNORECASE) or \
-           re.match(r"^\(Kumulierte\s+Zeit", stripped, re.IGNORECASE):
-            classifications.append((T_TIME, None))
-            continue
-
-        # Scene heading
-        if re.match(r"^SZENE\s+\d+|^Szene\s+\d+", stripped):
-            classifications.append((T_SCENE, None))
-            continue
-
-        # Episode
-        if re.match(r".*Folge\s+\d+", stripped, re.IGNORECASE):
-            classifications.append((T_EPISODE, None))
-            continue
-
-        # SFX/ATM in brackets (both [] and ())
-        if re.match(r"^[\[\(](SFX|ATM|TITELSONG|OUTRO)", stripped, re.IGNORECASE):
-            classifications.append((T_SFX_ATM, None))
-            continue
-
-        # LEIT-OBJEKT in brackets
-        if re.match(r"^[\[\(]LEIT-OBJEKT", stripped, re.IGNORECASE):
-            classifications.append((T_LEIT, None))
-            continue
-
-        # Other bracket/paren directions (full line enclosed)
-        if (stripped.startswith("[") and stripped.endswith("]")) or \
-           (stripped.startswith("(") and stripped.endswith(")")):
-            # Check if it's a stage direction (short, in parens)
-            # or a bracket direction (longer, descriptive)
-            if stripped.startswith("(") and stripped.endswith(")"):
-                classifications.append((T_STAGE_DIR, None))
-            else:
-                classifications.append((T_BRACKET, None))
-            continue
-
-        # Character name (standalone line)
-        if _is_character_name(stripped, known_characters):
-            classifications.append((T_CHARACTER, stripped.upper()))
-            continue
-
-        # Default: body text
-        classifications.append((T_BODY, None))
-
-    # --- Second pass: assign speaker to dialogue ---
+def _classify(texts):
+    known = _known_names()
     result = []
-    current_speaker = None
+    title_seen = False
 
-    for i, (ptype, data) in enumerate(classifications):
+    for text in texts:
+        s = text.strip()
+
+        if not s:
+            result.append((T_EMPTY, None))
+            continue
+
+        if not title_seen and re.search(r"Hedda.*Pico|HEDDA.*PICO", s, re.IGNORECASE):
+            title_seen = True
+            result.append((T_TITLE, None))
+            continue
+
+        if re.match(r"^[\[\(]?\s*Kumulierte\s+Zeit", s, re.IGNORECASE):
+            result.append((T_TIME, None))
+            continue
+
+        if re.match(r"^SZENE\s+\d+|^Szene\s+\d+", s):
+            result.append((T_SCENE, None))
+            continue
+
+        if re.match(r".*Folge\s+\d+", s, re.IGNORECASE):
+            result.append((T_EPISODE, None))
+            continue
+
+        if re.match(r"^[\[\(]\s*(SFX|ATM|TITELSONG|OUTRO)", s, re.IGNORECASE):
+            result.append((T_SFX_ATM, None))
+            continue
+
+        if re.match(r"^[\[\(]\s*LEIT-OBJEKT", s, re.IGNORECASE):
+            result.append((T_LEIT, None))
+            continue
+
+        if (s.startswith("[") and s.endswith("]")) or \
+           (s.startswith("(") and s.endswith(")")):
+            result.append((T_STAGE_DIR, None))
+            continue
+
+        if _is_character(s, known):
+            result.append((T_CHARACTER, s.upper()))
+            continue
+
+        result.append((T_BODY, None))
+
+    # Second pass: assign speaker
+    final = []
+    speaker = None
+    for ptype, data in result:
         if ptype == T_CHARACTER:
-            current_speaker = data
-            result.append((T_CHARACTER, data))
+            speaker = data
+            final.append((T_CHARACTER, data))
         elif ptype == T_EMPTY:
-            result.append((T_EMPTY, current_speaker))
+            final.append((T_EMPTY, speaker))
         elif ptype in (T_SCENE, T_TITLE, T_EPISODE):
-            current_speaker = None
-            result.append((ptype, None))
+            speaker = None
+            final.append((ptype, None))
         elif ptype == T_BODY:
-            if current_speaker:
-                result.append((T_DIALOGUE, current_speaker))
-            else:
-                result.append((T_BODY, None))
+            final.append((T_DIALOGUE, speaker) if speaker else (T_BODY, None))
         elif ptype == T_STAGE_DIR:
-            result.append((T_STAGE_DIR, current_speaker))
-        elif ptype in (T_SFX_ATM, T_BRACKET, T_LEIT):
-            result.append((ptype, current_speaker))
+            final.append((T_STAGE_DIR, speaker))
         else:
-            result.append((ptype, data))
+            final.append((ptype, speaker))
 
-    return result
+    return final
 
 
-# ─── Formatting pass ─────────────────────────────────────────────────────────
+# ─── Character color lookup ───────────────────────────────────────────────────
 
-def _get_character_color(character_name, dialogue_rules, unknown_tracker):
-    """Get the color config for a character."""
-    char_colors = dialogue_rules.get("character_colors", {})
+def _char_config(name, unknown_tracker, case_characters):
+    """Get color config for a character. Case characters get purple."""
+    upper = name.upper().strip()
 
-    for name, config in char_colors.items():
-        if name.upper() == character_name.upper():
-            return config
+    for known, cfg in CHARACTER_COLORS.items():
+        if known == upper:
+            return cfg
 
-    upper = character_name.upper()
     if upper not in unknown_tracker:
-        shades = dialogue_rules.get("secondary_shades", ["#0000FF", "#4169E1", "#1E90FF", "#00BFFF"])
-        case_color = dialogue_rules.get("case_character_color")
-
-        if case_color and len(unknown_tracker) == 0:
-            unknown_tracker[upper] = {"name_color": case_color}
-        elif shades:
-            idx = len(unknown_tracker) % len(shades)
-            unknown_tracker[upper] = {"name_color": shades[idx]}
+        if upper in case_characters:
+            unknown_tracker[upper] = {"name_color": CASE_CHARACTER_COLOR}
         else:
-            default = dialogue_rules.get("default_color", "#0000FF")
-            unknown_tracker[upper] = {"name_color": default}
+            # Assign blue shades (skip case characters in count)
+            blue_count = sum(1 for v in unknown_tracker.values()
+                            if v.get("name_color") != CASE_CHARACTER_COLOR)
+            idx = blue_count % len(BLUE_SHADES)
+            unknown_tracker[upper] = {"name_color": BLUE_SHADES[idx]}
 
     return unknown_tracker.get(upper, {"name_color": "#0000FF"})
 
 
-def _add_text_with_inline_formatting(para, text, base_font, base_size, base_bold,
-                                      base_italic, base_color, inline_rules,
-                                      base_underline=False):
-    """Add text to paragraph, applying inline rules (e.g., italic for parentheses)."""
-    if not inline_rules:
-        run = para.add_run(text)
-        _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
-        return
+# ─── Main formatting ─────────────────────────────────────────────────────────
 
-    # Find all inline matches
-    matches = []
-    for rule in inline_rules:
-        pattern = rule.get("pattern", "")
-        if not pattern:
-            continue
-        try:
-            for m in re.finditer(pattern, text):
-                matches.append((m.start(), m.end(), rule.get("format", {})))
-        except re.error:
-            continue
-
-    if not matches:
-        run = para.add_run(text)
-        _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
-        return
-
-    # Sort and filter overlaps
-    matches.sort(key=lambda x: x[0])
-    filtered = []
-    last_end = 0
-    for start, end, fmt in matches:
-        if start >= last_end:
-            filtered.append((start, end, fmt))
-            last_end = end
-
-    # Build runs
-    pos = 0
-    for start, end, fmt in filtered:
-        if start > pos:
-            run = para.add_run(text[pos:start])
-            _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
-
-        seg_text = text[start:end]
-        if fmt.get("uppercase"):
-            seg_text = seg_text.upper()
-
-        run = para.add_run(seg_text)
-        _format_run(
-            run, base_font,
-            fmt.get("size", base_size),
-            fmt.get("bold", base_bold),
-            fmt.get("italic", base_italic),
-            fmt.get("color", base_color),
-            fmt.get("underline", base_underline),
-        )
-        pos = end
-
-    if pos < len(text):
-        run = para.add_run(text[pos:])
-        _format_run(run, base_font, base_size, base_bold, base_italic, base_color, base_underline)
-
-
-def format_document(source_path, compiled_rules):
+def format_document(source_path, case_characters=None):
     """
-    Apply compiled rules to a document by rebuilding from scratch.
-    Returns bytes of the formatted .docx.
+    Format a Hedda & Pico script. Returns .docx bytes.
+    case_characters: set of character names (uppercase) that get purple color.
     """
-    defaults = compiled_rules.get("defaults", {
-        "font": "Arial", "size": 12, "color": "#000000",
-        "bold": False, "italic": False, "alignment": "left", "line_spacing": 1.5
-    })
+    if case_characters is None:
+        case_characters = set()
+    else:
+        case_characters = {c.upper().strip() for c in case_characters}
 
-    d_font = defaults.get("font", "Arial")
-    d_size = defaults.get("size", 12)
-    d_color = defaults.get("color", "#000000")
-    d_bold = defaults.get("bold", False)
-    d_italic = defaults.get("italic", False)
-    d_align = defaults.get("alignment", "left")
-    d_spacing = defaults.get("line_spacing", 1.5)
-
-    dialogue_rules = compiled_rules.get("dialogue_rules", {})
-    inline_rules = compiled_rules.get("inline_rules", [])
-    paragraph_rules = compiled_rules.get("paragraph_rules", [])
-    scene_blank = compiled_rules.get("scene_blank_lines", 0)
-    name_format = dialogue_rules.get("name_format", {"bold": True, "uppercase": True})
-
-    # Spacing after character name (in pt). 0.5 line at 12pt ≈ 6pt
-    name_space_after = compiled_rules.get("character_name_space_after_pt", 6)
-
-    # Line spacing between character name and dialogue (default 0.5 = tight)
-    name_line_spacing = compiled_rules.get("character_name_line_spacing", 0.5)
-
-    # Whether to merge stage directions onto character name line
-    merge_stage_dir = compiled_rules.get("merge_stage_direction_after_name", True)
-
-    # Stage direction / SFX / bracket size (default to d_size, can be overridden)
-    stage_dir_size = compiled_rules.get("stage_direction_size", d_size)
-
-    # Read source
     source = Document(source_path)
     texts = [p.text for p in source.paragraphs]
+    classifications = _classify(texts)
 
-    # Classify
-    classifications = classify_paragraphs(texts, compiled_rules)
+    # Pre-pass: find stage directions to merge onto character name line
+    merge_set = set()
+    for idx, (pt, _) in enumerate(classifications):
+        if pt == T_CHARACTER:
+            nxt = idx + 1
+            while nxt < len(classifications) and classifications[nxt][0] == T_EMPTY:
+                nxt += 1
+            if nxt < len(classifications) and classifications[nxt][0] == T_STAGE_DIR:
+                merge_set.add(nxt)
 
-    # Create new document
+    # New document
     doc = Document()
-
-    # Set default style
     style = doc.styles["Normal"]
-    style.font.name = d_font
-    style.font.size = Pt(d_size)
-    style.font.color.rgb = hex_to_rgb(d_color)
-    style.paragraph_format.line_spacing = d_spacing
+    style.font.name = FONT
+    style.font.size = Pt(BODY_SIZE)
+    style.font.color.rgb = RGBColor(0, 0, 0)
+    style.paragraph_format.line_spacing = LINE_SPACING
     style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
 
-    # Page numbers
-    _add_page_numbers(doc, compiled_rules)
-
-    # Track unknown character colors
-    unknown_chars = {}
-
-    # Find rule formats by name for quick lookup
-    rule_formats = {}
-    for rule in paragraph_rules:
-        rule_formats[rule.get("name", "")] = rule.get("format", {})
-
-    # Pre-pass: identify stage directions to merge onto character name lines
-    # When a T_STAGE_DIR immediately follows a T_CHARACTER (possibly with T_EMPTY between),
-    # mark it to be merged onto the character name line.
-    merge_into_name = set()  # indices of stage dirs to merge
-    if merge_stage_dir:
-        for idx, (pt, sp) in enumerate(classifications):
-            if pt == T_CHARACTER:
-                # Look ahead for immediately following stage direction
-                next_idx = idx + 1
-                while next_idx < len(classifications) and classifications[next_idx][0] == T_EMPTY:
-                    next_idx += 1
-                if next_idx < len(classifications) and classifications[next_idx][0] == T_STAGE_DIR:
-                    merge_into_name.add(next_idx)
+    _add_page_numbers(doc)
+    unknown = {}
 
     for i, (ptype, speaker) in enumerate(classifications):
-        text = texts[i]
-        stripped = text.strip()
+        text = _brackets_to_round(texts[i].strip())
 
-        # Skip stage directions that were merged onto the character name line
-        if i in merge_into_name:
+        if i in merge_set:
             continue
 
-        # Apply bracket conversion
-        stripped = _convert_brackets(stripped, compiled_rules)
-
-        # --- EMPTY ---
+        # ── EMPTY ──
         if ptype == T_EMPTY:
-            # Suppress empty lines immediately before a scene heading
-            # (scene_blank_lines will add the correct number)
-            if scene_blank:
-                next_real = i + 1
-                while next_real < len(classifications) and classifications[next_real][0] == T_EMPTY:
-                    next_real += 1
-                if next_real < len(classifications) and classifications[next_real][0] == T_SCENE:
-                    continue  # skip — scene handler adds its own blanks
-
+            nxt = i + 1
+            while nxt < len(classifications) and classifications[nxt][0] == T_EMPTY:
+                nxt += 1
+            if nxt < len(classifications) and classifications[nxt][0] == T_SCENE:
+                continue
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing)
+            _fmt_para(p)
             continue
 
-        # --- TITLE (series name) ---
+        # ── TITLE ──
         if ptype == T_TITLE:
-            fmt = _find_rule_format("titel", paragraph_rules) or \
-                  _find_rule_format("title", paragraph_rules) or \
-                  _find_rule_format("serien", paragraph_rules)
-            size = fmt.get("size", 20) if fmt else 20
-            bold = fmt.get("bold", True) if fmt else True
-            upper = fmt.get("uppercase", True) if fmt else True
-            underline = fmt.get("underline", False) if fmt else False
-
             p = doc.add_paragraph()
-            _format_paragraph(p, fmt.get("alignment", d_align) if fmt else d_align, d_spacing)
-            display = stripped.upper() if upper else stripped
-            run = p.add_run(display)
-            _format_run(run, d_font, size, bold, False, d_color, underline)
+            _fmt_para(p)
+            run = p.add_run(text.upper())
+            _fmt_run(run, size=TITLE_SIZE, bold=True)
             continue
 
-        # --- EPISODE ---
+        # ── EPISODE ──
         if ptype == T_EPISODE:
-            fmt = _find_rule_format("folge", paragraph_rules) or \
-                  _find_rule_format("episode", paragraph_rules)
-            size = fmt.get("size", 16) if fmt else 16
-            bold = fmt.get("bold", True) if fmt else True
-            upper = fmt.get("uppercase", False) if fmt else False
-            underline = fmt.get("underline", False) if fmt else False
-
-            # Space before episode line (e.g., 0.5 line = 6pt)
-            space_before = fmt.get("space_before_pt") if fmt else None
-
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing, space_before_pt=space_before)
-            display = stripped.upper() if upper else stripped
-            run = p.add_run(display)
-            _format_run(run, d_font, size, bold, False, d_color, underline)
+            _fmt_para(p, space_before=6)
+            run = p.add_run(text)
+            _fmt_run(run, size=EPISODE_SIZE, bold=True)
             continue
 
-        # --- SCENE HEADING ---
+        # ── SCENE ──
         if ptype == T_SCENE:
-            # Add blank lines before scene
-            if scene_blank and i > 0:
-                for _ in range(scene_blank):
-                    bp = doc.add_paragraph()
-                    _format_paragraph(bp, d_align, d_spacing)
-
-            fmt = _find_rule_format("szene", paragraph_rules) or \
-                  _find_rule_format("scene", paragraph_rules)
-            size = fmt.get("size", 13) if fmt else 13
-            bold = fmt.get("bold", True) if fmt else True
-            upper = fmt.get("uppercase", True) if fmt else True
-            underline = fmt.get("underline", False) if fmt else False
-
+            if i > 0:
+                bp = doc.add_paragraph()
+                _fmt_para(bp)
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing)
-            display = stripped.upper() if upper else stripped
-            run = p.add_run(display)
-            _format_run(run, d_font, size, bold, False, d_color, underline)
+            _fmt_para(p)
+            run = p.add_run(text.upper())
+            _fmt_run(run, size=SCENE_SIZE, bold=True, underline=True)
             continue
 
-        # --- TIME MARKER ---
+        # ── TIME MARKER ──
         if ptype == T_TIME:
-            fmt = _find_rule_format("zeit", paragraph_rules) or \
-                  _find_rule_format("time", paragraph_rules) or \
-                  _find_rule_format("kumuliert", paragraph_rules)
-            size = fmt.get("size", 9) if fmt else 9
-            italic = fmt.get("italic", True) if fmt else True
-            align = fmt.get("alignment", "right") if fmt else "right"
-
             p = doc.add_paragraph()
-            _format_paragraph(p, align, d_spacing)
-            run = p.add_run(stripped)
-            _format_run(run, d_font, size, False, italic, d_color)
+            _fmt_para(p, align="right")
+            run = p.add_run(text)
+            _fmt_run(run, size=TIME_SIZE, italic=True)
             continue
 
-        # --- CHARACTER NAME ---
+        # ── CHARACTER NAME ──
         if ptype == T_CHARACTER:
-            char_config = _get_character_color(speaker, dialogue_rules, unknown_chars)
-            name_color = char_config.get("name_color", d_color)
-            name_bold = name_format.get("bold", True)
-            name_upper = name_format.get("uppercase", True)
+            cfg = _char_config(speaker, unknown, case_characters)
+            name_color = cfg.get("name_color", "#000000")
 
-            # Character name is NEVER indented — only dialogue text gets indent
-            # Use tight line spacing so dialogue "sticks" to the name
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, name_line_spacing, space_after_pt=name_space_after)
-            display = stripped.upper() if name_upper else stripped
-            run = p.add_run(display)
-            _format_run(run, d_font, d_size, name_bold, False, name_color)
+            _fmt_para(p, spacing=NAME_LINE_SPACING, space_after=0)
+            run = p.add_run(text.upper())
+            _fmt_run(run, bold=True, color=name_color)
 
-            # Merge stage direction onto same line if flagged
-            if merge_stage_dir:
-                next_idx = i + 1
-                while next_idx < len(classifications) and classifications[next_idx][0] == T_EMPTY:
-                    next_idx += 1
-                if next_idx in merge_into_name:
-                    dir_text = texts[next_idx].strip()
-                    dir_text = _convert_brackets(dir_text, compiled_rules)
-                    run_space = p.add_run(" ")
-                    _format_run(run_space, d_font, d_size, False, False, name_color)
-                    run_dir = p.add_run(dir_text)
-                    _format_run(run_dir, d_font, stage_dir_size, False, True, d_color)
+            # Merge following stage direction onto same line
+            nxt = i + 1
+            while nxt < len(classifications) and classifications[nxt][0] == T_EMPTY:
+                nxt += 1
+            if nxt in merge_set:
+                dir_text = _brackets_to_round(texts[nxt].strip())
+                sp = p.add_run(" ")
+                _fmt_run(sp, color=name_color)
+                dr = p.add_run(dir_text)
+                _fmt_run(dr, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # --- DIALOGUE ---
+        # ── DIALOGUE ──
         if ptype == T_DIALOGUE and speaker:
-            char_config = _get_character_color(speaker, dialogue_rules, unknown_chars)
-            text_color = char_config.get("text_color", d_color)
-            text_italic = char_config.get("text_italic", False)
-            indent = char_config.get("text_indent_cm", None)
+            cfg = _char_config(speaker, unknown, case_characters)
+            text_color = cfg.get("text_color", "#000000")
+            text_italic = cfg.get("text_italic", False)
+            indent = cfg.get("text_indent_cm", None)
 
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing, indent_cm=indent)
-            _add_text_with_inline_formatting(
-                p, stripped, d_font, d_size, d_bold, text_italic, text_color, inline_rules
-            )
+            _fmt_para(p, indent_cm=indent)
+            run = p.add_run(text)
+            _fmt_run(run, italic=text_italic, color=text_color)
             continue
 
-        # --- STAGE DIRECTION (in parentheses, own line) ---
+        # ── STAGE DIRECTION (standalone) ──
         if ptype == T_STAGE_DIR:
-            # Stage directions get indent if current speaker has it
             indent = None
             if speaker:
-                char_config = _get_character_color(speaker, dialogue_rules, unknown_chars)
-                indent = char_config.get("text_indent_cm", None)
-
+                cfg = _char_config(speaker, unknown, case_characters)
+                indent = cfg.get("text_indent_cm", None)
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing, indent_cm=indent)
-            run = p.add_run(stripped)
-            _format_run(run, d_font, stage_dir_size, False, True, d_color)
+            _fmt_para(p, indent_cm=indent)
+            run = p.add_run(text)
+            _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # --- SFX/ATM ---
+        # ── SFX/ATM ──
         if ptype == T_SFX_ATM:
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing)
-            run = p.add_run(stripped)
-            _format_run(run, d_font, stage_dir_size, False, True, d_color)
+            _fmt_para(p)
+            run = p.add_run(text)
+            _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # --- LEIT-OBJEKT ---
+        # ── LEIT-OBJEKT ──
         if ptype == T_LEIT:
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing)
-
-            leit_match = re.search(r"LEIT-OBJEKT|Leit-[Oo]bjekt", stripped, re.IGNORECASE)
-            if leit_match:
-                before = stripped[:leit_match.start()]
-                leit_text = stripped[leit_match.start():leit_match.end()]
-                after = stripped[leit_match.end():]
-
+            _fmt_para(p)
+            m = re.search(r"LEIT-OBJEKT|Leit-[Oo]bjekt", text, re.IGNORECASE)
+            if m:
+                before = text[:m.start()]
+                leit = text[m.start():m.end()]
+                after = text[m.end():]
                 if before:
-                    run = p.add_run(before)
-                    _format_run(run, d_font, stage_dir_size, False, True, d_color)
-
-                run = p.add_run(leit_text.upper())
-                _format_run(run, d_font, stage_dir_size, True, True, d_color)
-
+                    r = p.add_run(before)
+                    _fmt_run(r, size=STAGE_DIR_SIZE, italic=True)
+                r = p.add_run(leit.upper())
+                _fmt_run(r, size=STAGE_DIR_SIZE, bold=True, italic=True)
                 if after:
-                    run = p.add_run(after)
-                    _format_run(run, d_font, stage_dir_size, False, True, d_color)
+                    r = p.add_run(after)
+                    _fmt_run(r, size=STAGE_DIR_SIZE, italic=True)
             else:
-                run = p.add_run(stripped)
-                _format_run(run, d_font, stage_dir_size, False, True, d_color)
+                r = p.add_run(text)
+                _fmt_run(r, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # --- BRACKET DIRECTION ---
+        # ── BRACKET/OTHER ──
         if ptype == T_BRACKET:
             p = doc.add_paragraph()
-            _format_paragraph(p, d_align, d_spacing)
-            run = p.add_run(stripped)
-            _format_run(run, d_font, stage_dir_size, False, True, d_color)
+            _fmt_para(p)
+            run = p.add_run(text)
+            _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
             continue
 
-        # --- Matched paragraph rule ---
-        if ptype.startswith("rule:"):
-            rule_name = ptype[5:]
-            fmt = rule_formats.get(rule_name, {})
-
-            p = doc.add_paragraph()
-            _format_paragraph(p, fmt.get("alignment", d_align), d_spacing)
-
-            display = stripped.upper() if fmt.get("uppercase") else stripped
-            run = p.add_run(display)
-            _format_run(
-                run, d_font,
-                fmt.get("size", d_size),
-                fmt.get("bold", d_bold),
-                fmt.get("italic", d_italic),
-                fmt.get("color", d_color),
-                fmt.get("underline", False),
-            )
-            continue
-
-        # --- DEFAULT BODY ---
+        # ── DEFAULT BODY ──
         p = doc.add_paragraph()
-        _format_paragraph(p, d_align, d_spacing)
-        _add_text_with_inline_formatting(
-            p, stripped, d_font, d_size, d_bold, d_italic, d_color, inline_rules
-        )
+        _fmt_para(p)
+        run = p.add_run(text)
+        _fmt_run(run)
 
-    # Save
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
     return buf.getvalue()
 
 
-def _find_rule_format(keyword, paragraph_rules):
-    """Find a paragraph rule by keyword in its name."""
-    keyword = keyword.lower()
-    for rule in paragraph_rules:
-        if keyword in rule.get("name", "").lower():
-            return rule.get("format", {})
-    return None
-
-
-def get_output_filename(original_name, compiled_rules):
-    """Generate output filename with optional date suffix."""
+def get_output_filename(original_name):
+    """Generate output filename with date suffix (DDMM)."""
     base = original_name.replace(".docx", "")
-
-    if compiled_rules.get("filename_suffix_date"):
-        fmt = compiled_rules.get("filename_date_format", "DDMM")
-        now = datetime.now()
-        if fmt == "DDMM":
-            suffix = now.strftime("%d%m")
-        elif fmt == "MMDD":
-            suffix = now.strftime("%m%d")
-        elif fmt == "YYYYMMDD":
-            suffix = now.strftime("%Y%m%d")
-        else:
-            suffix = now.strftime("%d%m")
-        return f"{base}_{suffix}.docx"
-
-    return f"{base}_formatted.docx"
+    suffix = datetime.now().strftime("%d%m")
+    return f"{base}_{suffix}.docx"
