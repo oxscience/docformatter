@@ -373,7 +373,7 @@ def format_document(source_path, case_characters=None):
             indent = cfg.get("text_indent_cm", None)
 
             p = doc.add_paragraph()
-            _fmt_para(p, indent_cm=indent)
+            _fmt_para(p, indent_cm=indent, space_after=0)
             run = p.add_run(text)
             _fmt_run(run, italic=text_italic, color=text_color)
             continue
@@ -385,7 +385,7 @@ def format_document(source_path, case_characters=None):
                 cfg = _char_config(speaker, unknown, case_characters)
                 indent = cfg.get("text_indent_cm", None)
             p = doc.add_paragraph()
-            _fmt_para(p, indent_cm=indent)
+            _fmt_para(p, indent_cm=indent, space_after=0)
             run = p.add_run(text)
             _fmt_run(run, size=STAGE_DIR_SIZE, italic=True)
             continue
