@@ -21,7 +21,7 @@ from datetime import datetime
 FONT = "Calibri"
 BODY_SIZE = 12
 LINE_SPACING = 1.5
-NAME_LINE_SPACING = 0.5       # tight spacing between name and dialogue
+NAME_LINE_SPACING = 1.0       # single spacing on name line (0.5 clips text in Word Desktop)
 STAGE_DIR_SIZE = 9             # Regieanweisungen, SFX, ATM
 TITLE_SIZE = 48                # "HEDDA & PICO"
 EPISODE_SIZE = 26              # "Folge X: ..."
