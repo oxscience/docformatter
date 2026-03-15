@@ -307,7 +307,7 @@ HTML = r"""
         </div>
     </div>
 
-    <p class="footer">Texte bleiben erhalten — nur die Formatierung wird angepasst.</p>
+    <p class="footer">Texte bleiben erhalten — nur die Formatierung wird angepasst.<br>v2.0</p>
 
     <script>
         // Persist case character
